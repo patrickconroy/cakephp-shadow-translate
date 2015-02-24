@@ -26,13 +26,17 @@ class ShadowTranslateBehavior extends TranslateBehavior
     {
         $config += [
             'mainTableAlias' => $table->alias(),
-            'alias' => $table->alias() . 'Translations',
-            'translationTable' => $table->table() . '_translations',
+            'translationTable' => $table->alias() . 'Translations',
             'fields' => [],
             'onlyTranslated' => false,
         ];
-
+        
         parent::__construct($table, $config);
+
+        $this->config('translateRegistryAlias', $this->_translationTable->registryAlias());
+        $this->config('translateAlias', $this->_translationTable->alias());
+
+        $this->setupFieldAssociations(null, null, null, $this->config('strategy'));
     }
 
     /**
@@ -50,8 +54,10 @@ class ShadowTranslateBehavior extends TranslateBehavior
      */
     public function setupFieldAssociations($fields, $table, $model, $strategy)
     {
-        $targetAlias = $this->_translationTable->alias();
-        $this->_table->hasMany($targetAlias, [
+        if ($fields !== null) {
+            return;
+        }
+        $this->_table->hasMany($this->config('translateRegistryAlias'), [
             'foreignKey' => 'id',
             'strategy' => $strategy,
             'propertyName' => '_i18n',
@@ -84,16 +90,16 @@ class ShadowTranslateBehavior extends TranslateBehavior
         } else {
             $joinType = $config['onlyTranslated'] ? 'INNER' : 'LEFT';
         }
-
-        $this->_table->hasOne($config['alias'], [
+        $this->_table->hasOne($config['translateRegistryAlias'], [
             'foreignKey' => ['id'],
             'joinType' => $joinType,
             'propertyName' => 'translation',
             'conditions' => [
-                $config['alias'] . '.locale' => $locale,
+                $config['translateAlias'] . '.locale' => $locale,
             ],
         ]);
-        $query->contain([$config['alias']]);
+
+        $query->contain([$config['translateAlias']]);
 
         $this->_addFieldsToQuery($query, $config);
         $this->_iterateClause($query, 'order', $config);
@@ -134,10 +140,10 @@ class ShadowTranslateBehavior extends TranslateBehavior
                 in_array($field, $select, true) ||
                 in_array("$alias.$field", $select, true)
             ) {
-                $query->select($query->aliasField($field, $config['alias']));
+                $query->select($query->aliasField($field, $config['translateAlias']));
             }
         }
-        $query->select($query->aliasField('locale', $config['alias']));
+        $query->select($query->aliasField('locale', $config['translateAlias']));
     }
 
     /**
@@ -200,7 +206,7 @@ class ShadowTranslateBehavior extends TranslateBehavior
             return;
         }
 
-        $alias = $config['alias'];
+        $alias = $config['translateAlias'];
         $fields = $this->_translationFields();
         $mainTableAlias = $config['mainTableAlias'];
         $mainTableFields = $this->_mainFields();
