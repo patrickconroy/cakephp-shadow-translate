@@ -30,13 +30,8 @@ class ShadowTranslateBehavior extends TranslateBehavior
             'fields' => [],
             'onlyTranslated' => false,
         ];
-        
+
         parent::__construct($table, $config);
-
-        $this->config('translateRegistryAlias', $this->_translationTable->registryAlias());
-        $this->config('translateAlias', $this->_translationTable->alias());
-
-        $this->setupFieldAssociations(null, null, null, $this->config('strategy'));
     }
 
     /**
@@ -54,10 +49,7 @@ class ShadowTranslateBehavior extends TranslateBehavior
      */
     public function setupFieldAssociations($fields, $table, $model, $strategy)
     {
-        if ($fields !== null) {
-            return;
-        }
-        $this->_table->hasMany($this->config('translateRegistryAlias'), [
+        $this->_table->hasMany($this->_translationTable->registryAlias(), [
             'foreignKey' => 'id',
             'strategy' => $strategy,
             'propertyName' => '_i18n',
@@ -90,16 +82,16 @@ class ShadowTranslateBehavior extends TranslateBehavior
         } else {
             $joinType = $config['onlyTranslated'] ? 'INNER' : 'LEFT';
         }
-        $this->_table->hasOne($config['translateRegistryAlias'], [
+        $this->_table->hasOne($this->_translationTable->registryAlias(), [
             'foreignKey' => ['id'],
             'joinType' => $joinType,
             'propertyName' => 'translation',
             'conditions' => [
-                $config['translateAlias'] . '.locale' => $locale,
+                $this->_translationTable->alias() . '.locale' => $locale,
             ],
         ]);
 
-        $query->contain([$config['translateAlias']]);
+        $query->contain([$this->_translationTable->alias()]);
 
         $this->_addFieldsToQuery($query, $config);
         $this->_iterateClause($query, 'order', $config);
@@ -140,10 +132,10 @@ class ShadowTranslateBehavior extends TranslateBehavior
                 in_array($field, $select, true) ||
                 in_array("$alias.$field", $select, true)
             ) {
-                $query->select($query->aliasField($field, $config['translateAlias']));
+                $query->select($query->aliasField($field, $this->_translationTable->alias()));
             }
         }
-        $query->select($query->aliasField('locale', $config['translateAlias']));
+        $query->select($query->aliasField('locale', $this->_translationTable->alias()));
     }
 
     /**
@@ -165,7 +157,7 @@ class ShadowTranslateBehavior extends TranslateBehavior
             return;
         }
 
-        $alias = $config['alias'];
+        $alias = $this->_translationTable->alias();
         $fields = $this->_translationFields();
         $mainTableAlias = $config['mainTableAlias'];
         $mainTableFields = $this->_mainFields();
@@ -206,7 +198,7 @@ class ShadowTranslateBehavior extends TranslateBehavior
             return;
         }
 
-        $alias = $config['translateAlias'];
+        $alias = $this->_translationTable->alias();
         $fields = $this->_translationFields();
         $mainTableAlias = $config['mainTableAlias'];
         $mainTableFields = $this->_mainFields();
@@ -260,7 +252,7 @@ class ShadowTranslateBehavior extends TranslateBehavior
         $primaryKey = (array)$this->_table->primaryKey();
         $key = $entity->get(current($primaryKey));
 
-        $translation = $this->_translationTable()->find()
+        $translation = $this->_translationTable->find()
             ->select(array_merge(['id', 'locale'], $fields))
             ->where(['locale' => $locale, 'id' => $key])
             ->bufferResults(false)
@@ -399,32 +391,6 @@ class ShadowTranslateBehavior extends TranslateBehavior
     }
 
     /**
-     * Based on the passed config, return the translation table instance
-     *
-     * If the table already exists in the registry - don't pass any config
-     * as that'll just lead to an exception trying to reconfigure an existing
-     * table.
-     *
-     * @param array $config behavior config to use
-     * @return \Cake\ORM\Table Translation table instance
-     */
-    protected function _translationTable($config = [])
-    {
-        if (!$config) {
-            $config = $this->config();
-        }
-
-        if (TableRegistry::exists($config['alias'])) {
-            return TableRegistry::get($config['alias']);
-        }
-
-        return TableRegistry::get(
-            $config['alias'],
-            ['table' => $config['translationTable']]
-        );
-    }
-
-    /**
      * Lazy define and return the main table fields
      *
      * @return array
@@ -458,8 +424,7 @@ class ShadowTranslateBehavior extends TranslateBehavior
             return $fields;
         }
 
-        $table = $this->_translationTable();
-        $fields = $table->schema()->columns();
+        $fields = $this->_translationTable->schema()->columns();
         $fields = array_values(array_diff($fields, ['id', 'locale']));
 
         $this->config('fields', $fields);

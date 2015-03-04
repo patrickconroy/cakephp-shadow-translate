@@ -58,6 +58,46 @@ class ShadowTranslateBehaviorTest extends TranslateBehaviorTest
     }
 
     /**
+     * Makes sure that hydration false doesn't error out.
+     * This currently fails, and probably shouldn't.
+     *
+     * @return void
+     */
+    public function testHydrateFalse()
+    {
+        // $table = TableRegistry::get('Articles');
+        // $table->addBehavior('ShadowTranslate.ShadowTranslate');
+
+        // $result = $table
+        //     ->find('translations')
+        //     ->hydrate(false)
+        //     ->first()
+        //     ->toArray();
+        // $this->assertArrayHasKey('title', $result);
+    }
+
+    /**
+     * Tests that associations are returned.
+     * Currently ShadowTranslate wipes out things in
+     * @return [type] [description]
+     */
+    public function testAssociations()
+    {
+        $table = TableRegistry::get('Articles');
+        $table->addBehavior('Translate');
+        $table->belongsTo('Authors');
+        $table->locale('eng');
+        $result = $table
+            ->find('translations')
+            ->where(['Articles.id' => 1])
+            ->contain(['Authors'])
+            ->firstOrFail();
+
+        $this->assertNotNull($result->author, "There should be an author for article 1.");
+        $this->assertNotEmpty($result->_translations, "Translations can't be empty.");
+    }
+
+    /**
      * Allow usage without specifying fields explicitly
      *
      * @return void
