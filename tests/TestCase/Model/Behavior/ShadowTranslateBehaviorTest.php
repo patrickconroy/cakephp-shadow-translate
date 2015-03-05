@@ -86,7 +86,7 @@ class ShadowTranslateBehaviorTest extends TranslateBehaviorTest
         $table = TableRegistry::get('Articles');
         $table->addBehavior('Translate');
         $table->belongsTo('Authors');
-        $table->locale('eng');
+       # $table->locale('eng');
         $result = $table
             ->find('translations')
             ->where(['Articles.id' => 1])

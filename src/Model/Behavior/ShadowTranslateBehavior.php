@@ -25,12 +25,11 @@ class ShadowTranslateBehavior extends TranslateBehavior
     public function __construct(Table $table, array $config = [])
     {
         $config += [
-            'mainTableAlias' => $table->alias(),
             'translationTable' => $table->alias() . 'Translations',
             'fields' => [],
-            'onlyTranslated' => false,
+            'onlyTranslated' => true,
+            'strategy' => 'join'
         ];
-
         parent::__construct($table, $config);
     }
 
@@ -43,18 +42,13 @@ class ShadowTranslateBehavior extends TranslateBehavior
      * @param array $fields - ignored
      * @param string $table - ignored
      * @param string $model - ignored
-     * @param string $strategy the strategy used in the _i18n association
+     * @param string $strategy - ignored
      *
      * @return void
      */
     public function setupFieldAssociations($fields, $table, $model, $strategy)
     {
-        $this->_table->hasMany($this->_translationTable->registryAlias(), [
-            'foreignKey' => 'id',
-            'strategy' => $strategy,
-            'propertyName' => '_i18n',
-            'dependent' => true
-        ]);
+        return;
     }
 
     /**
@@ -70,158 +64,40 @@ class ShadowTranslateBehavior extends TranslateBehavior
     public function beforeFind(Event $event, Query $query, $options)
     {
         $locale = $this->locale();
-
-        if ($locale === $this->config('defaultLocale')) {
+        $config = $this->config();
+        if ($locale === $config['defaultLocale']) {
             return;
         }
-
-        $config = $this->config();
 
         if (isset($options['filterByCurrentLocale'])) {
             $joinType = $options['filterByCurrentLocale'] ? 'INNER' : 'LEFT';
         } else {
             $joinType = $config['onlyTranslated'] ? 'INNER' : 'LEFT';
         }
-        $this->_table->hasOne($this->_translationTable->registryAlias(), [
-            'foreignKey' => ['id'],
+
+        $this->_table->hasOne('translation', [
+            'foreignKey' => 'id',
+            'className' => $this->_translationTable->registryAlias(),
             'joinType' => $joinType,
-            'propertyName' => 'translation',
+            'strategy' => $config['strategy'],
+            'dependent' => true,
             'conditions' => [
-                $this->_translationTable->alias() . '.locale' => $locale,
-            ],
+               'translation.locale' => $locale,
+            ]
+        ]);
+        $this->_table->hasMany($this->_translationTable->alias(), [
+            'foreignKey' => 'id',
+            'className' => $this->_translationTable->registryAlias(),
+            'joinType' => $joinType,
+            'dependent' => true,
+            'propertyName' => '_i18n'
         ]);
 
-        $query->contain([$this->_translationTable->alias()]);
-
-        $this->_addFieldsToQuery($query, $config);
-        $this->_iterateClause($query, 'order', $config);
-        $this->_traverseClause($query, 'where', $config);
-
-        $query->formatResults(function ($results) use ($locale) {
-            return $this->_rowMapper($results, $locale);
-        }, $query::PREPEND);
-    }
-
-    /**
-     * Add translation fields to query
-     *
-     * If the query is using autofields (directly or implicitly) add the
-     * main table's fields to the query first.
-     *
-     * Only add translations for fields that are in the main table, always
-     * add the locale field though.
-     *
-     * @param \Cake\ORM\Query $query the query to check
-     * @param array $config the config to use for adding fields
-     * @return void
-     */
-    protected function _addFieldsToQuery(Query $query, array $config)
-    {
-        $select = $query->clause('select');
-        $addAll = false;
-
-        if (!count($select) || $query->autoFields() === true) {
-            $addAll = true;
-            $query->select($query->repository()->schema()->columns());
-            $select = $query->clause('select');
-        }
-
-        $alias = $config['mainTableAlias'];
-        foreach ($this->_translationFields() as $field) {
-            if ($addAll ||
-                in_array($field, $select, true) ||
-                in_array("$alias.$field", $select, true)
-            ) {
-                $query->select($query->aliasField($field, $this->_translationTable->alias()));
-            }
-        }
-        $query->select($query->aliasField('locale', $this->_translationTable->alias()));
-    }
-
-    /**
-     * Iterate over a clause to alias fields
-     *
-     * The objective here is to transparently prevent ambiguous field errors by
-     * prefixing fields with the appropriate table alias. This method currently
-     * expects to receive an order clause only.
-     *
-     * @param \Cake\ORM\Query $query the query to check
-     * @param string $name The clause name
-     * @param array $config the config to use for adding fields
-     * @return void
-     */
-    protected function _iterateClause(Query $query, $name = '', $config = [])
-    {
-        $clause = $query->clause($name);
-        if (!$clause || !$clause->count()) {
-            return;
-        }
-
-        $alias = $this->_translationTable->alias();
-        $fields = $this->_translationFields();
-        $mainTableAlias = $config['mainTableAlias'];
-        $mainTableFields = $this->_mainFields();
-
-        $clause->iterateParts(function ($c, $field) use ($fields, $alias, $mainTableAlias, $mainTableFields) {
-            if (!is_string($field) || strpos($field, '.')) {
-                return;
-            }
-
-            if (in_array($field, $fields)) {
-                $field = "$alias.$field";
-
-                return;
-            }
-
-            if (in_array($field, $mainTableFields)) {
-                $field = "$mainTableAlias.$field";
-            }
-        });
-    }
-
-    /**
-     * Traverse over a clause to alias fields
-     *
-     * The objective here is to transparently prevent ambiguous field errors by
-     * prefixing fields with the appropriate table alias. This method currently
-     * expects to receive a where clause only.
-     *
-     * @param \Cake\ORM\Query $query the query to check
-     * @param string $name The clause name
-     * @param array $config the config to use for adding fields
-     * @return void
-     */
-    protected function _traverseClause(Query $query, $name = '', $config = [])
-    {
-        $clause = $query->clause($name);
-        if (!$clause || !$clause->count()) {
-            return;
-        }
-
-        $alias = $this->_translationTable->alias();
-        $fields = $this->_translationFields();
-        $mainTableAlias = $config['mainTableAlias'];
-        $mainTableFields = $this->_mainFields();
-
-        $clause->traverse(function ($expression) use ($fields, $alias, $mainTableAlias, $mainTableFields) {
-            if (!($expression instanceof FieldInterface)) {
-                return;
-            }
-            $field = $expression->getField();
-            if (!$field || strpos($field, '.')) {
-                return;
-            }
-
-            if (in_array($field, $fields)) {
-                $expression->setField("$alias.$field");
-
-                return;
-            }
-
-            if (in_array($field, $mainTableFields)) {
-                $expression->setField("$mainTableAlias.$field");
-            }
-        });
+        $query
+            ->contain([$this->_translationTable->alias(), 'translation'])
+            ->formatResults(function ($results) use ($locale) {
+                return $this->_rowMapper($results, $locale);
+            }, $query::PREPEND);
     }
 
     /**
@@ -236,8 +112,7 @@ class ShadowTranslateBehavior extends TranslateBehavior
     public function beforeSave(Event $event, Entity $entity, ArrayObject $options)
     {
         $locale = $entity->get('_locale') ?: $this->locale();
-        $table = $this->_config['translationTable'];
-        $newOptions = [$table => ['validate' => false]];
+        $newOptions = [strtolower($this->_translationTable->alias()) => ['validate' => false]];
         $options['associated'] = $newOptions + $options['associated'];
 
         $this->_bundleTranslatedFields($entity);
@@ -247,28 +122,23 @@ class ShadowTranslateBehavior extends TranslateBehavior
             return;
         }
 
-        $values = $entity->extract($this->_config['fields'], true);
-        $fields = array_keys($values);
+        $values = $entity->extract($this->_config['fields'], false);
+        $fields = $this->_config['fields'];
         $primaryKey = (array)$this->_table->primaryKey();
         $key = $entity->get(current($primaryKey));
-
         $translation = $this->_translationTable->find()
             ->select(array_merge(['id', 'locale'], $fields))
             ->where(['locale' => $locale, 'id' => $key])
             ->bufferResults(false)
             ->first();
 
-        if ($translation) {
-            foreach ($fields as $field) {
-                $translation->set($field, $values[$field]);
-            }
-        } else {
+        if (!$translation) {
             $translation = new Entity(['id' => $key, 'locale' => $locale] + $values, [
                 'useSetters' => false,
                 'markNew' => true
             ]);
         }
-
+  
         $entity->set('_i18n', array_merge($bundled, [$translation]));
         $entity->set('_locale', $locale, ['setter' => false]);
         $entity->dirty('_locale', false);
@@ -292,7 +162,7 @@ class ShadowTranslateBehavior extends TranslateBehavior
             if ($row === null) {
                 return $row;
             }
-
+            $fields = $this->config('fields');
             $hydrated = !is_array($row);
 
             if (empty($row['translation'])) {
@@ -309,8 +179,10 @@ class ShadowTranslateBehavior extends TranslateBehavior
             $translation = $row['translation'];
 
             $keys = $hydrated ? $translation->visibleProperties() : array_keys($translation);
-
             foreach ($keys as $field) {
+                if (!empty($fields) && !in_array($field, $fields)) {
+                    continue;
+                }
                 if ($field === 'locale') {
                     $row['_locale'] = $translation[$field];
                     continue;
@@ -341,11 +213,18 @@ class ShadowTranslateBehavior extends TranslateBehavior
     public function groupTranslations($results)
     {
         return $results->map(function ($row) {
+            $fields = $this->config('fields');
             $translations = (array)$row->get('_i18n');
-
+            $hydrated = !is_array($row);
             $result = [];
             foreach ($translations as $translation) {
+                $keys = $hydrated ? $translation->visibleProperties() : array_keys($translation);
                 unset($translation['id']);
+                foreach ($keys as $field) {
+                    if (!empty($fields) && !in_array($field, array_merge(['id', 'locale'], $fields))) {
+                        unset($translation[$field]);
+                    }
+                }
                 $result[$translation['locale']] = $translation;
             }
 
@@ -353,7 +232,6 @@ class ShadowTranslateBehavior extends TranslateBehavior
             $row->set('_translations', $result, $options);
             unset($row['_i18n']);
             $row->clean();
-
             return $row;
         });
     }
@@ -386,29 +264,7 @@ class ShadowTranslateBehavior extends TranslateBehavior
                 $translation->set($update, ['setter' => false]);
             }
         }
-
         $entity->set('_i18n', $translations);
-    }
-
-    /**
-     * Lazy define and return the main table fields
-     *
-     * @return array
-     */
-    protected function _mainFields()
-    {
-        $fields = $this->config('mainTableFields');
-
-        if ($fields) {
-            return $fields;
-        }
-
-        $table = $this->_table;
-        $fields = $table->schema()->columns();
-
-        $this->config('mainTableFields', $fields);
-
-        return $fields;
     }
 
     /**
